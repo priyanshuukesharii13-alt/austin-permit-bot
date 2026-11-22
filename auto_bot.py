@@ -157,12 +157,29 @@ RAW DATA:
 
 
 def send_emails(subject, html_body):
-    sender = os.environ["SENDER_EMAIL"].strip()
-    app_password = os.environ["SENDER_APP_PASSWORD"].replace(" ", "").strip()
+    sender = "".join(os.environ["SENDER_EMAIL"].split())
+    app_password = "".join(os.environ["SENDER_APP_PASSWORD"].split())
     raw_receivers = os.environ["RECEIVER_EMAILS"]
-    recipients = [e.strip() for e in raw_receivers.split(",") if e.strip()]
+    recipients = ["".join(e.split()) for e in raw_receivers.split(",") if e.strip()]
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+    print(
+        f"Email check -> valid_sender={'@' in sender}, "
+        f"app_password_len={len(app_password)}, recipients={len(recipients)}"
+    )
+
+    if "@" not in sender:
+        raise ValueError("SENDEREMAIL secret is missing or invalid.")
+    if len(app_password) != 16:
+        raise ValueError(
+            f"SENDERAPPPASSWORD must be a 16-letter Google App Password (got {len(app_password)} chars)."
+        )
+    if not recipients:
+        raise ValueError("RECIVEREMAILS secret is empty.")
+
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
         server.login(sender, app_password)
         for recipient in recipients:
             msg = MIMEMultipart("alternative")
