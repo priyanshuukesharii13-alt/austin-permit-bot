@@ -12,7 +12,6 @@ API_URL = "https://data.austintexas.gov/resource/3syk-w9eu.json"
 
 def fetch_leads():
     now = datetime.now(timezone.utc)
-    # Monday ko last 3 din, baaki weekdays ko last 2 din check karo; weekend test ke liye fallback 7 din
     initial_days = 3 if now.weekday() == 0 else 2
     target_work = ("new", "remodel", "demolition", "addition", "finish out")
 
@@ -59,11 +58,37 @@ def fetch_leads():
     return ""
 
 
+def pick_working_models(client):
+    models = []
+    skip_words = ("embedding", "tts", "image", "audio", "live", "veo", "aqa", "robotics", "imagen")
+    for m in client.models.list():
+        name = getattr(m, "name", "") or ""
+        actions = getattr(m, "supported_actions", None) or []
+        if actions and "generateContent" not in actions:
+            continue
+        low = name.lower()
+        if "gemini" in low and not any(w in low for w in skip_words):
+            models.append(name)
+
+    flash_stable = sorted(
+        [m for m in models if "flash" in m.lower() and "preview" not in m.lower() and "exp" not in m.lower()],
+        reverse=True,
+    )
+    flash_other = sorted(
+        [m for m in models if "flash" in m.lower() and m not in flash_stable],
+        reverse=True,
+    )
+    rest = sorted(
+        [m for m in models if m not in flash_stable and m not in flash_other],
+        reverse=True,
+    )
+    return flash_stable + flash_other + rest
+
+
 def generate_html_email(leads_text):
     api_key = os.environ["GEMINI_API_KEY"].strip()
-    client = genai.Client(api_key=api_key)
-
     today_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+
     prompt = f"""You are a B2B commercial construction lead researcher in Austin, Texas.
 Select ONLY the TOP 5 highest-value commercial projects below that need roll-off dumpster rentals, heavy debris removal, or post-construction cleaning.
 Ignore minor electrical/plumbing/sign permits unless tied to major new building construction or full demolition.
@@ -83,11 +108,41 @@ RAW DATA:
 {leads_text}
 """
 
-    response = client.models.generate_content(
-        model="models/gemini-3.0-flash",
-        contents=prompt,
-    )
-    text = (response.text or "").strip()
+    text = None
+    last_error = None
+
+    for api_ver in (None, "v1beta"):
+        client = (
+            genai.Client(api_key=api_key, http_options={"api_version": api_ver})
+            if api_ver
+            else genai.Client(api_key=api_key)
+        )
+        try:
+            candidates = pick_working_models(client)
+        except Exception as e:
+            last_error = e
+            continue
+
+        for model_name in candidates:
+            try:
+                print(f"Trying model: {model_name} (api={api_ver or 'default'})")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                if response.text:
+                    text = response.text.strip()
+                    print(f"Success with: {model_name}")
+                    break
+            except Exception as e:
+                print(f"Skipped {model_name}: {e}")
+                last_error = e
+        if text:
+            break
+
+    if not text:
+        raise RuntimeError(f"No Gemini model worked. Last error: {last_error}")
+
     text = re.sub(r"^```html\s*|^```\s*|```$", "", text, flags=re.IGNORECASE | re.MULTILINE).strip()
 
     lines = text.splitlines()
