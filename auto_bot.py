@@ -70,19 +70,22 @@ def pick_working_models(client):
         if "gemini" in low and not any(w in low for w in skip_words):
             models.append(name)
 
+    preferred = ["models/gemini-3.6-flash", "models/gemini-2.5-flash"]
+    ordered = [m for m in preferred if m in models]
+
     flash_stable = sorted(
-        [m for m in models if "flash" in m.lower() and "preview" not in m.lower() and "exp" not in m.lower()],
+        [m for m in models if m not in ordered and "flash" in m.lower() and "preview" not in m.lower() and "exp" not in m.lower()],
         reverse=True,
     )
     flash_other = sorted(
-        [m for m in models if "flash" in m.lower() and m not in flash_stable],
+        [m for m in models if m not in ordered and m not in flash_stable and "flash" in m.lower()],
         reverse=True,
     )
     rest = sorted(
-        [m for m in models if m not in flash_stable and m not in flash_other],
+        [m for m in models if m not in ordered and m not in flash_stable and m not in flash_other],
         reverse=True,
     )
-    return flash_stable + flash_other + rest
+    return ordered + flash_stable + flash_other + rest
 
 
 def generate_html_email(leads_text):
@@ -162,8 +165,11 @@ def send_emails(subject, html_body):
     raw_receivers = os.environ["RECEIVER_EMAILS"]
     recipients = ["".join(e.split()) for e in raw_receivers.split(",") if e.strip()]
 
+    masked_sender = (
+        f"{sender[:3]}***@{sender.split('@')[1]}" if "@" in sender else "INVALID"
+    )
     print(
-        f"Email check -> valid_sender={'@' in sender}, "
+        f"Email check -> sender={masked_sender}, "
         f"app_password_len={len(app_password)}, recipients={len(recipients)}"
     )
 
@@ -176,19 +182,35 @@ def send_emails(subject, html_body):
     if not recipients:
         raise ValueError("RECIVEREMAILS secret is empty.")
 
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(sender, app_password)
-        for recipient in recipients:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = f"Austin Permit Alerts <{sender}>"
-            msg["To"] = recipient
-            msg.attach(MIMEText(html_body, "html"))
-            server.sendmail(sender, recipient, msg.as_string())
-            print(f"Email sent to: {recipient}")
+    last_err = None
+    for auth_method in ("PLAIN", "LOGIN"):
+        try:
+            with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.user = sender
+                server.password = app_password
+                auth_fn = server.auth_plain if auth_method == "PLAIN" else server.auth_login
+                print(f"Trying Gmail SMTP AUTH {auth_method}...")
+                server.auth(auth_method, auth_fn)
+                for recipient in recipients:
+                    msg = MIMEMultipart("alternative")
+                    msg["Subject"] = subject
+                    msg["From"] = f"Austin Permit Alerts <{sender}>"
+                    msg["To"] = recipient
+                    msg.attach(MIMEText(html_body, "html"))
+                    server.sendmail(sender, recipient, msg.as_string())
+                    print(f"Email sent to: {recipient}")
+                return
+        except smtplib.SMTPAuthenticationError as e:
+            print(f"Gmail rejected login ({auth_method}): {e.smtp_code} {e.smtp_error}")
+            raise
+        except Exception as e:
+            print(f"AUTH {auth_method} failed: {type(e).__name__}: {e}")
+            last_err = e
+
+    raise last_err
 
 
 if __name__ == "__main__":
