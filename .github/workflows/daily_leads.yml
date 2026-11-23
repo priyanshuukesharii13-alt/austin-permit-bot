@@ -2,8 +2,8 @@ name: Daily Austin Permit Leads
 
 on:
   schedule:
-    # Monday se Friday roz 12:30 UTC (Austin subah 6:30 AM / India shaam 6:00 PM)
-    - cron: '30 12 * * 1-5'
+    # Monday se Friday roz 12:17 UTC (Austin subah 6:17 AM / India shaam 5:47 PM)
+    - cron: '17 12 * * 1-5'
   workflow_dispatch:
 
 jobs:
