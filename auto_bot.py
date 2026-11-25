@@ -36,11 +36,13 @@ def fetch_leads():
             if not any(k in work_class.lower() or k in desc.lower() for k in target_work):
                 continue
 
+            contractor = str(item.get("contractor_company_name") or "N/A").replace("*", "").replace("MAIN", "").strip()
+
             entry = (
                 f"- Date: {str(item.get('issue_date', ''))[:10]} | "
                 f"Type: {work_class} ({permit_type}) | "
                 f"Address: {item.get('original_address1', 'N/A')}, Austin, TX {item.get('original_zip', '')} | "
-                f"Contractor: {item.get('contractor_company_name', 'N/A')} ({item.get('contractor_phone', 'N/A')}) | "
+                f"Contractor: {contractor} ({item.get('contractor_phone', 'N/A')}) | "
                 f"Valuation: {item.get('total_job_valuation', 'N/A')} | "
                 f"Desc: {desc[:220]}"
             )
@@ -50,8 +52,8 @@ def fetch_leads():
             else:
                 others.append(entry)
 
-        combined = (priority + others)[:20]
-        if len(combined) >= 5 or days_back == 7:
+        combined = (priority + others)[:30]
+        if len(combined) >= 8 or days_back == 7:
             print(f"Fetched {len(combined)} leads (lookback: {days_back} days)")
             return "\n".join(combined)
 
@@ -93,7 +95,7 @@ def generate_html_email(leads_text):
     today_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
     prompt = f"""You are a B2B commercial construction lead researcher in Austin, Texas.
-Select ONLY the TOP 5 highest-value commercial projects below that need roll-off dumpster rentals, heavy debris removal, or post-construction cleaning.
+Select the TOP 10 to 12 highest-value commercial projects below (or all relevant high-value ones if fewer than 10 exist) that need roll-off dumpster rentals, heavy debris removal, or post-construction cleaning.
 Ignore minor electrical/plumbing/sign permits unless tied to major new building construction or full demolition.
 Use ONLY facts present in the raw data below (do not invent addresses, valuations, or phone numbers).
 
@@ -101,8 +103,8 @@ Output format rules (STRICT):
 - Line 1 MUST start with: SUBJECT: <short catchy email subject with date {today_str}>
 - Starting from Line 2, output ONLY clean, responsive HTML email body (inline CSS, clean typography, card/list styling, easy to read on Gmail/Outlook mobile & desktop).
 - Do NOT wrap the output in markdown code blocks like ```html.
-- Include for each of the 5 leads:
-  1. Project Title
+- Include for each lead:
+  1. Numbered Project Title (e.g., 1. Project Title)
   2. Permit Date & Full Address
   3. Contractor Company & Phone
   4. Why It's Hot (1 crisp sentence)
